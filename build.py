@@ -7,6 +7,7 @@ templates the custom layer's network/console files, and runs bitbake.
 
 import ipaddress
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -84,6 +85,24 @@ def load_config(path):
         cfg = yaml.safe_load(fh)
     validate_config(cfg)
     return cfg
+
+
+def hash_password(password, salt=None):
+    """SHA-512 crypt via openssl; avoids the crypt module removed in 3.13.
+
+    The crypt salt alphabet is [./a-zA-Z0-9], so the result can never
+    contain '{' and is safe to embed in BitBake conf files.
+    """
+    cmd = ["openssl", "passwd", "-6", "-stdin"]
+    if salt is not None:
+        cmd[3:3] = ["-salt", salt]
+    result = subprocess.run(cmd, input=password + "\n", capture_output=True,
+                            text=True, check=True)
+    return result.stdout.strip()
+
+
+def netmask_to_prefix(netmask):
+    return ipaddress.IPv4Network(f"0.0.0.0/{netmask}").prefixlen
 
 
 if __name__ == "__main__":
