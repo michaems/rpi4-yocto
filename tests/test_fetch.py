@@ -1,3 +1,4 @@
+import copy
 import subprocess
 from pathlib import Path
 
@@ -55,6 +56,21 @@ def test_fetch_refuses_dirty_clone(tmp_path):
         build.fetch_layers(cfg, layers_dir)
 
 
+def test_fetch_refuses_diverged_local_commits(tmp_path):
+    origin = make_origin(tmp_path / "origin")
+    layers_dir = tmp_path / "layers"
+    cfg = layer_cfg(origin)
+    build.fetch_layers(cfg, layers_dir)
+    clone = layers_dir / "testlayer"
+    (clone / "LOCAL").write_text("local commit\n")
+    subprocess.run(["git", "-C", str(clone), "add", "LOCAL"], check=True)
+    subprocess.run(["git", "-C", str(clone), "-c", "user.email=t@t",
+                    "-c", "user.name=t", "commit", "-m", "local work"],
+                   check=True, capture_output=True)
+    with pytest.raises(build.FetchError, match="testlayer"):
+        build.fetch_layers(cfg, layers_dir)
+
+
 def test_fetch_checks_out_pinned_rev(tmp_path):
     origin = make_origin(tmp_path / "origin")
     first = subprocess.run(["git", "-C", str(origin), "rev-parse", "HEAD"],
@@ -81,7 +97,8 @@ def test_fetch_skips_local_path_layers(tmp_path):
 
 
 def test_write_outputs(tmp_path, monkeypatch):
-    cfg = build.load_config(REPO_ROOT / "project.yml")
+    cfg = copy.deepcopy(build.load_config(REPO_ROOT / "project.yml"))
+    cfg["user"]["password"] = "sekrit-plaintext-XYZ"
     monkeypatch.setattr(build, "hash_password",
                         lambda pw, salt=None: "$6$testsalt$fakehash")
     src = tmp_path / "repo"
@@ -90,7 +107,7 @@ def test_write_outputs(tmp_path, monkeypatch):
     build.write_outputs(cfg, src)
     local_conf = (src / "build/conf/local.conf").read_text()
     assert "$6$testsalt$fakehash" in local_conf
-    assert "michaems" in local_conf
+    assert "sekrit-plaintext-XYZ" not in local_conf
     bblayers = (src / "build/conf/bblayers.conf").read_text()
     assert str(src / "meta-rpi4-custom") in bblayers
     net = (src / "meta-rpi4-custom/recipes-core/systemd-conf/files/"

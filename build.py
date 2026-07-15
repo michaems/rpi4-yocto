@@ -213,6 +213,14 @@ def fetch_layers(cfg, layers_dir):
                     f"changes; commit/stash them or remove the directory")
             print(f"Updating {layer['name']} ({branch})...")
             _git(dest, "fetch", "origin")
+            if "rev" not in layer:
+                ahead = _git(dest, "rev-list", "--count",
+                             f"origin/{branch}..HEAD").stdout.strip()
+                if ahead != "0":
+                    raise FetchError(
+                        f"layer checkout {layer['name']} at {dest} has local "
+                        f"commits not on origin/{branch}; commit/stash them "
+                        f"or remove the directory")
         if "rev" in layer:
             _git(dest, "checkout", "--detach", layer["rev"])
         else:
