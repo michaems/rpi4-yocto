@@ -21,7 +21,7 @@ single YAML configuration file. The image must have:
 | Yocto release | Scarthgap 5.0 LTS (supported until April 2028) |
 | Machine | `raspberrypi4-64` |
 | Image | `core-image-full-cmdline` (includes OpenSSH and sudo) |
-| Init/networking | Poky defaults: sysvinit + ifupdown (no systemd switch) |
+| Init/networking | systemd (`INIT_MANAGER = "systemd"`) + systemd-networkd/resolved |
 | Layers | poky, meta-raspberrypi (both `scarthgap` branch), meta-rpi4-custom (local) |
 
 ## Repository layout
@@ -33,8 +33,7 @@ rpi4-yocto/
 ├── meta-rpi4-custom/        # small custom layer, committed to git
 │   ├── conf/layer.conf
 │   └── recipes-core/
-│       ├── init-ifupdown/   # bbappend + templated interfaces file (static IP)
-│       ├── network-conf/    # installs static /etc/resolv.conf
+│       ├── systemd-conf/    # bbappend + templated .network file (static IP + DNS)
 │       └── sudo-group-conf/ # /etc/sudoers.d/sudo-group enabling %sudo
 ├── layers/                  # git-ignored; poky + meta-raspberrypi cloned here
 ├── build/                   # git-ignored; generated conf/ + BitBake output
@@ -51,10 +50,11 @@ rpi4-yocto/
    - validates the YAML,
    - clones or updates poky and meta-raspberrypi into `layers/` at their
      pinned branch (or `rev` if given),
-   - writes `build/conf/bblayers.conf` and `build/conf/local.conf`,
+   - writes `build/conf/bblayers.conf` and `build/conf/local.conf`
+     (including `INIT_MANAGER = "systemd"`),
    - hashes the password (SHA-512 crypt) and injects it via `extrausers`,
-   - templates the static-IP `interfaces` file and `resolv.conf` into
-     `meta-rpi4-custom` from the YAML values,
+   - templates the static-IP systemd `.network` file into `meta-rpi4-custom`
+     from the YAML values,
    - sources the Yocto environment and runs `bitbake <image>`.
 3. Output: `build/tmp/deploy/images/raspberrypi4-64/core-image-full-cmdline-raspberrypi4-64.rootfs.wic.bz2`
    (plus `.wic.bmap`), flashable with `bmaptool` or `dd`.
@@ -122,21 +122,33 @@ no rights by default. The `sudo-group-conf` recipe installs
 `/etc/sudoers.d/sudo-group` containing `%sudo ALL=(ALL:ALL) ALL` and is added
 via `IMAGE_INSTALL:append` in the generated `local.conf`.
 
+### Init system
+
+The generated `local.conf` sets `INIT_MANAGER = "systemd"`, which switches the
+distro features and virtual runtime providers to systemd. Networking is
+handled by systemd-networkd with name resolution via systemd-resolved (both
+enabled by default in the Yocto systemd package).
+
 ### Static IP and DNS
 
-`init-ifupdown` bbappend in `meta-rpi4-custom` with an `interfaces` file
-templated by `build.py`:
+OE-core's `systemd-conf` recipe ships the default network config. The custom
+layer carries a `systemd-conf` bbappend whose `.network` file `build.py`
+templates from the YAML, replacing the default DHCP config for the chosen
+interface:
 
 ```
-auto eth0
-iface eth0 inet static
-    address 192.168.100.180
-    netmask 255.255.255.0
-    gateway 192.168.100.1
+[Match]
+Name=eth0
+
+[Network]
+Address=192.168.100.180/24
+Gateway=192.168.100.1
+DNS=192.168.100.1
 ```
 
-The `network-conf` recipe installs a static `/etc/resolv.conf` with
-`nameserver 192.168.100.1`.
+DNS needs no separate recipe: systemd-resolved picks up the `DNS=` entry and
+manages `/etc/resolv.conf`. (The YAML `netmask` is converted to prefix length
+for the `Address=` line.)
 
 ## Error handling (build.py)
 
@@ -155,9 +167,9 @@ The `network-conf` recipe installs a static `/etc/resolv.conf` with
 ## Testing
 
 - **Unit (pytest, fast, no Yocto):** sample YAML produces expected
-  `local.conf`, `bblayers.conf`, `interfaces`, `resolv.conf`; password hash
-  verifies against `michaems`; invalid input (bad IP, missing keys) is
-  rejected.
+  `local.conf`, `bblayers.conf`, and systemd `.network` file (including
+  netmask→prefix conversion); password hash verifies against `michaems`;
+  invalid input (bad IP, missing keys) is rejected.
 - **Build verification (manual):** `./build.py` completes and produces the
   `.wic.bz2` image.
 - **On-target checklist (documented in README):** board boots; `ip addr`
@@ -170,6 +182,5 @@ The `network-conf` recipe installs a static `/etc/resolv.conf` with
 ## Out of scope
 
 - WiFi configuration
-- systemd
 - kas or CI pipelines
 - Additional image features beyond `core-image-full-cmdline`
