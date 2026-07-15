@@ -1,0 +1,40 @@
+name: rpi4-yocto
+machine: raspberrypi4-64
+image: core-image-full-cmdline
+distro: poky
+
+layers:
+  - name: poky
+    url: https://git.yoctoproject.org/poky
+    branch: scarthgap
+    layers: [meta, meta-poky, meta-yocto-bsp]
+  - name: meta-raspberrypi
+    url: https://git.yoctoproject.org/meta-raspberrypi
+    branch: scarthgap
+  - name: meta-openembedded
+    url: https://git.openembedded.org/meta-openembedded
+    branch: scarthgap
+    layers: [meta-oe]
+  - name: meta-rpi4-custom
+    path: meta-rpi4-custom
+
+user:
+  name: michaems
+  password: michaems
+  sudo: true
+
+root:
+  disable_login: true
+
+network:
+  interface: eth0
+  address: 192.168.100.180
+  netmask: 255.255.255.0
+  gateway: 192.168.100.1
+  dns: [192.168.100.1]
+
+console:
+  keymap: fi
+  font: ter-v16n
+
+local_conf_extra: []
