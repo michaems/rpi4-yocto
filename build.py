@@ -5,8 +5,11 @@ Reads project.yml, fetches pinned layers, generates BitBake configuration,
 templates the custom layer's network/console files, and runs bitbake.
 """
 
+import argparse
 import ipaddress
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -244,5 +247,58 @@ def write_outputs(cfg, repo_root):
     (files_dir / "vconsole.conf").write_text(generate_vconsole_conf(cfg))
 
 
+REQUIRED_TOOLS = ["git", "tar", "bash", "openssl", "gcc"]
+
+
+def check_host_prereqs():
+    missing = [t for t in REQUIRED_TOOLS if shutil.which(t) is None]
+    if missing:
+        raise SystemExit(
+            f"missing host tools: {', '.join(missing)} — install them and "
+            f"see the Yocto quick start for full host requirements")
+
+
+def run_bitbake(cfg, repo_root):
+    repo_root = Path(repo_root)
+    env_script = repo_root / "layers" / "poky" / "oe-init-build-env"
+    build_dir = repo_root / "build"
+    shell_cmd = (f"source {shlex.quote(str(env_script))} "
+                 f"{shlex.quote(str(build_dir))} && "
+                 f"bitbake {shlex.quote(cfg['image'])}")
+    proc = subprocess.run(["bash", "-c", shell_cmd], cwd=str(repo_root))
+    if proc.returncode == 0:
+        deploy = build_dir / "tmp" / "deploy" / "images" / cfg["machine"]
+        print(f"\nBuild OK. Flashable image in: {deploy}")
+    return proc.returncode
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Build the RPi4 Yocto image described by project.yml")
+    parser.add_argument("--config", default="project.yml",
+                        help="path to the project YAML (default: project.yml)")
+    parser.add_argument("--no-build", action="store_true",
+                        help="fetch layers and generate config, skip bitbake")
+    args = parser.parse_args(argv)
+
+    try:
+        cfg = load_config(Path(args.config))
+    except (ConfigError, OSError, yaml.YAMLError) as exc:
+        raise SystemExit(f"config error: {exc}")
+
+    check_host_prereqs()
+    repo_root = Path(__file__).resolve().parent
+    try:
+        fetch_layers(cfg, repo_root / "layers")
+    except (FetchError, subprocess.CalledProcessError) as exc:
+        raise SystemExit(f"layer fetch failed: {exc}")
+    write_outputs(cfg, repo_root)
+
+    if args.no_build:
+        print("Setup complete (--no-build): layers fetched, config written.")
+        return 0
+    return run_bitbake(cfg, repo_root)
+
+
 if __name__ == "__main__":
-    sys.exit(0)  # replaced by main() in a later task
+    sys.exit(main())
