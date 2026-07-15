@@ -18,6 +18,9 @@ def test_check_host_prereqs_fails_on_missing_tool(monkeypatch):
 
 def test_main_no_build_runs_setup_only(monkeypatch, capsys):
     calls = []
+    monkeypatch.setattr(build, "load_config",
+                        lambda p: {"image": "core-image-full-cmdline",
+                                   "machine": "raspberrypi4-64"})
     monkeypatch.setattr(build, "check_host_prereqs",
                         lambda: calls.append("prereqs"))
     monkeypatch.setattr(build, "fetch_layers",
@@ -32,6 +35,9 @@ def test_main_no_build_runs_setup_only(monkeypatch, capsys):
 
 
 def test_main_full_runs_bitbake(monkeypatch):
+    monkeypatch.setattr(build, "load_config",
+                        lambda p: {"image": "core-image-full-cmdline",
+                                   "machine": "raspberrypi4-64"})
     monkeypatch.setattr(build, "check_host_prereqs", lambda: None)
     monkeypatch.setattr(build, "fetch_layers", lambda cfg, d: None)
     monkeypatch.setattr(build, "write_outputs", lambda cfg, r: None)
