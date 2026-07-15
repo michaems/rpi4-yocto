@@ -186,5 +186,55 @@ def generate_vconsole_conf(cfg):
     return f"KEYMAP={console['keymap']}\nFONT={console['font']}\n"
 
 
+class FetchError(Exception):
+    """Raised when a layer checkout cannot be safely updated."""
+
+
+def _git(repo, *args):
+    return subprocess.run(["git", "-C", str(repo), *args],
+                          check=True, capture_output=True, text=True)
+
+
+def fetch_layers(cfg, layers_dir):
+    for layer in cfg["layers"]:
+        if "path" in layer:
+            continue
+        dest = Path(layers_dir) / layer["name"]
+        branch = layer["branch"]
+        if not dest.exists():
+            print(f"Cloning {layer['name']} ({branch})...")
+            subprocess.run(["git", "clone", "--branch", branch,
+                            layer["url"], str(dest)], check=True)
+        else:
+            status = _git(dest, "status", "--porcelain").stdout
+            if status.strip():
+                raise FetchError(
+                    f"layer checkout {layer['name']} at {dest} has local "
+                    f"changes; commit/stash them or remove the directory")
+            print(f"Updating {layer['name']} ({branch})...")
+            _git(dest, "fetch", "origin")
+        if "rev" in layer:
+            _git(dest, "checkout", "--detach", layer["rev"])
+        else:
+            _git(dest, "checkout", "-B", branch, f"origin/{branch}")
+
+
+def write_outputs(cfg, repo_root):
+    repo_root = Path(repo_root)
+    conf_dir = repo_root / "build" / "conf"
+    conf_dir.mkdir(parents=True, exist_ok=True)
+
+    password_hash = hash_password(cfg["user"]["password"])
+    (conf_dir / "local.conf").write_text(
+        generate_local_conf(cfg, password_hash))
+    (conf_dir / "bblayers.conf").write_text(
+        generate_bblayers_conf(cfg, repo_root))
+
+    files_dir = (repo_root / "meta-rpi4-custom" / "recipes-core"
+                 / "systemd-conf" / "files")
+    (files_dir / "10-static.network").write_text(generate_network_file(cfg))
+    (files_dir / "vconsole.conf").write_text(generate_vconsole_conf(cfg))
+
+
 if __name__ == "__main__":
     sys.exit(0)  # replaced by main() in a later task
