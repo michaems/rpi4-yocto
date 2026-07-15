@@ -12,6 +12,8 @@ single YAML configuration file. The image must have:
 - Root login disabled
 - Static IP `192.168.100.180/24` on `eth0`, gateway and DNS `192.168.100.1`
 - SSH access (`ssh michaems@192.168.100.180`)
+- Finnish keyboard layout and a Courier-like console font (Terminus) on the
+  HDMI console
 
 ## Decisions
 
@@ -22,7 +24,15 @@ single YAML configuration file. The image must have:
 | Machine | `raspberrypi4-64` |
 | Image | `core-image-full-cmdline` (includes OpenSSH and sudo) |
 | Init/networking | systemd (`INIT_MANAGER = "systemd"`) + systemd-networkd/resolved |
-| Layers | poky, meta-raspberrypi (both `scarthgap` branch), meta-rpi4-custom (local) |
+| Console | Finnish keymap (`KEYMAP=fi`) + Terminus font (`ter-v16n`) via `/etc/vconsole.conf` |
+| Layers | poky, meta-raspberrypi, meta-openembedded/meta-oe (all `scarthgap` branch), meta-rpi4-custom (local) |
+
+The original ask was Courier New as the console font. The Linux virtual
+console renders only bitmap PSF fonts, and Courier New is a proprietary
+Microsoft TrueType font that cannot be redistributed in a Yocto build, so the
+agreed substitute is Terminus (`ter-v16n`), the closest Courier-like console
+font. Over SSH the font is chosen by the client terminal, where Courier New
+can be set directly. meta-oe is required for the `terminus-font` recipe.
 
 ## Repository layout
 
@@ -33,7 +43,8 @@ rpi4-yocto/
 ├── meta-rpi4-custom/        # small custom layer, committed to git
 │   ├── conf/layer.conf
 │   └── recipes-core/
-│       ├── systemd-conf/    # bbappend + templated .network file (static IP + DNS)
+│       ├── systemd-conf/    # bbappend: templated .network file (static IP + DNS)
+│       │                    #           + vconsole.conf (fi keymap, Terminus font)
 │       └── sudo-group-conf/ # /etc/sudoers.d/sudo-group enabling %sudo
 ├── layers/                  # git-ignored; poky + meta-raspberrypi cloned here
 ├── build/                   # git-ignored; generated conf/ + BitBake output
@@ -76,6 +87,10 @@ layers:
   - name: meta-raspberrypi
     url: https://git.yoctoproject.org/meta-raspberrypi
     branch: scarthgap
+  - name: meta-openembedded
+    url: https://git.openembedded.org/meta-openembedded
+    branch: scarthgap
+    layers: [meta-oe]             # sub-layers to add to bblayers.conf
   - name: meta-rpi4-custom
     path: meta-rpi4-custom        # local layer, no clone
 
@@ -93,6 +108,10 @@ network:
   netmask: 255.255.255.0
   gateway: 192.168.100.1
   dns: [192.168.100.1]
+
+console:
+  keymap: fi                      # Finnish keyboard layout
+  font: ter-v16n                  # Terminus 16px, Courier-like
 
 local_conf_extra: []              # optional raw local.conf lines
 ```
@@ -150,6 +169,22 @@ DNS needs no separate recipe: systemd-resolved picks up the `DNS=` entry and
 manages `/etc/resolv.conf`. (The YAML `netmask` is converted to prefix length
 for the `Address=` line.)
 
+### Console keymap and font
+
+The same `systemd-conf` bbappend installs `/etc/vconsole.conf`, templated from
+the YAML `console` section:
+
+```
+KEYMAP=fi
+FONT=ter-v16n
+```
+
+systemd-vconsole-setup applies both at boot. The generated `local.conf` adds
+the required packages via `IMAGE_INSTALL:append`: `kbd`, `kbd-keymaps`
+(Finnish keymap data) and `terminus-font-consolefonts` (from meta-oe).
+This affects the HDMI console only; SSH sessions use the client terminal's
+own font, where Courier New can be selected.
+
 ## Error handling (build.py)
 
 - Up-front schema validation: required keys, valid IPv4 for
@@ -167,20 +202,24 @@ for the `Address=` line.)
 ## Testing
 
 - **Unit (pytest, fast, no Yocto):** sample YAML produces expected
-  `local.conf`, `bblayers.conf`, and systemd `.network` file (including
-  netmask→prefix conversion); password hash verifies against `michaems`;
-  invalid input (bad IP, missing keys) is rejected.
+  `local.conf`, `bblayers.conf`, systemd `.network` file (including
+  netmask→prefix conversion), and `vconsole.conf`; password hash verifies
+  against `michaems`; invalid input (bad IP, missing keys) is rejected.
 - **Build verification (manual):** `./build.py` completes and produces the
   `.wic.bz2` image.
 - **On-target checklist (documented in README):** board boots; `ip addr`
   shows 192.168.100.180; `ssh michaems@192.168.100.180` works with password
   `michaems`; `sudo whoami` prints `root`; root login (`su root`, SSH as
-  root) fails.
+  root) fails; HDMI console renders the Terminus font and Finnish keys
+  (ö, ä, å) type correctly.
 - No CI: a full Yocto build needs ~50 GB disk and hours of CPU; out of scope
   for this sandbox repository.
 
 ## Out of scope
 
 - WiFi configuration
+- Literal Courier New rendering on target (needs a GUI stack + proprietary
+  font; Terminus substitutes on console, Courier New is set client-side for
+  SSH)
 - kas or CI pipelines
 - Additional image features beyond `core-image-full-cmdline`
