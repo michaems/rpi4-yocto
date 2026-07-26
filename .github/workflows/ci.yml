@@ -1,0 +1,35 @@
+# CI for rpi4-yocto.
+#
+# - test: unit tests + config-generation smoke test, every push and PR.
+# - build-image (added separately): full Yocto image build, manual
+#   dispatch or v* tags. If a cold-cache build hits the timeout, just
+#   re-run it -- it resumes from the saved sstate cache.
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: pip install pyyaml pytest
+
+      - name: Unit tests
+        run: python3 -m pytest tests/ -v
+
+      - name: Config-generation smoke test
+        run: ./build.py --no-build
