@@ -33,6 +33,24 @@ python3 -m pytest tests/ # unit tests (fast, no Yocto needed)
 Everything (machine, image, user, network, console) is configured in
 `project.yml`; edit it and re-run `./build.py`.
 
+## CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs two jobs:
+
+- **test** — on every push and pull request: unit tests plus a
+  `./build.py --no-build` smoke test.
+- **build-image** — on manual dispatch (Actions → CI → Run workflow) or
+  a `v*` tag: full image build on a hosted runner. The flashable
+  `.wic.bz2` + `.bmap` land in the run's `rpi4-image` artifact
+  (30-day retention).
+
+The image job frees ~30 GB of preinstalled runner software, builds with
+`rm_work`, and caches sstate/downloads between runs. A first (cold-cache)
+build takes several hours; if it hits the timeout, re-run the workflow —
+it resumes from the saved sstate cache. CI-only BitBake overrides are
+injected by `scripts/make_ci_config.py`, which writes a git-ignored
+`project.ci.yml`; the committed `project.yml` is untouched.
+
 ## Flashing
 
 The build drops the image in
