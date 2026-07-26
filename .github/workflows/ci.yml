@@ -59,23 +59,23 @@ jobs:
             python3-yaml socat texinfo unzip wget xz-utils zstd
           sudo locale-gen en_US.UTF-8
 
-      - name: Restore sstate cache
-        uses: actions/cache/restore@v4
-        with:
-          path: build/sstate-cache
-          key: sstate-${{ hashFiles('project.yml') }}-${{ github.run_id }}
-          restore-keys: |
-            sstate-${{ hashFiles('project.yml') }}-
-            sstate-
-
       - name: Restore downloads cache
         uses: actions/cache/restore@v4
         with:
           path: build/downloads
-          key: downloads-${{ hashFiles('project.yml') }}-${{ github.run_id }}
+          key: downloads-${{ hashFiles('project.yml') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             downloads-${{ hashFiles('project.yml') }}-
             downloads-
+
+      - name: Restore sstate cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/sstate-cache
+          key: sstate-${{ hashFiles('project.yml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            sstate-${{ hashFiles('project.yml') }}-
+            sstate-
 
       - name: Generate CI build config
         run: python3 scripts/make_ci_config.py project.yml project.ci.yml
@@ -95,16 +95,16 @@ jobs:
             build/tmp/deploy/images/raspberrypi4-64/*.wic.bmap
           retention-days: 30
 
-      - name: Save sstate cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: build/sstate-cache
-          key: sstate-${{ hashFiles('project.yml') }}-${{ github.run_id }}
-
       - name: Save downloads cache
         if: always()
         uses: actions/cache/save@v4
         with:
           path: build/downloads
-          key: downloads-${{ hashFiles('project.yml') }}-${{ github.run_id }}
+          key: downloads-${{ hashFiles('project.yml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save sstate cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: build/sstate-cache
+          key: sstate-${{ hashFiles('project.yml') }}-${{ github.run_id }}-${{ github.run_attempt }}
