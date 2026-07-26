@@ -1,0 +1,110 @@
+# CI for rpi4-yocto.
+#
+# - test: unit tests + config-generation smoke test, every push and PR.
+# - build-image (added separately): full Yocto image build, manual
+#   dispatch or v* tags. If a cold-cache build hits the timeout, just
+#   re-run it -- it resumes from the saved sstate cache.
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: pip install pyyaml pytest
+
+      - name: Unit tests
+        run: python3 -m pytest tests/ -v
+
+      - name: Config-generation smoke test
+        run: ./build.py --no-build
+
+  build-image:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          echo "Before cleanup:" && df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          echo "After cleanup:" && df -h /
+
+      - name: Install Yocto host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential chrpath cpio debianutils diffstat file gawk \
+            gcc git iputils-ping liblz4-tool locales python3 python3-git \
+            python3-jinja2 python3-pexpect python3-pip python3-subunit \
+            python3-yaml socat texinfo unzip wget xz-utils zstd
+          sudo locale-gen en_US.UTF-8
+
+      - name: Restore downloads cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/downloads
+          key: downloads-${{ hashFiles('project.yml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            downloads-${{ hashFiles('project.yml') }}-
+            downloads-
+
+      - name: Restore sstate cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/sstate-cache
+          key: sstate-${{ hashFiles('project.yml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            sstate-${{ hashFiles('project.yml') }}-
+            sstate-
+
+      - name: Generate CI build config
+        run: python3 scripts/make_ci_config.py project.yml project.ci.yml
+
+      - name: Build image
+        timeout-minutes: 300
+        env:
+          LANG: en_US.UTF-8
+        run: ./build.py --config project.ci.yml
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpi4-image
+          path: |
+            build/tmp/deploy/images/raspberrypi4-64/*.wic.bz2
+            build/tmp/deploy/images/raspberrypi4-64/*.wic.bmap
+          retention-days: 30
+
+      - name: Save downloads cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: build/downloads
+          key: downloads-${{ hashFiles('project.yml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save sstate cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: build/sstate-cache
+          key: sstate-${{ hashFiles('project.yml') }}-${{ github.run_id }}-${{ github.run_attempt }}
